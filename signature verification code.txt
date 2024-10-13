@@ -1,0 +1,98 @@
+import cv2
+import numpy as np
+import os
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from skimage.feature import hog
+import matplotlib.pyplot as plt
+
+def load_images_from_folder(folder):
+    images = []
+    labels = []
+    for filename in os.listdir(folder):
+        img = cv2.imread(os.path.join(folder, filename))
+        if img is not None:
+            images.append(img)
+            labels.append(filename.split('_')[0])  # Assuming filename format is 'label_image.png'
+    return images, labels
+
+def preprocess_image(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
+    _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY_INV)  # Binary thresholding
+    edges = cv2.Canny(thresh, 100, 200)  # Edge detection
+    return edges
+
+def extract_contour_features(image):
+    contours, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if len(contours) > 0:
+        contour = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(contour)
+        perimeter = cv2.arcLength(contour, True)
+        return np.array([area, perimeter])
+    return np.zeros(2)
+
+def extract_hog_features(image):
+    # Resize the image to a fixed size (e.g., 128x128) for HOG
+    resized_image = cv2.resize(image, (128, 128))
+    hog_features = hog(resized_image, pixels_per_cell=(16, 16), cells_per_block=(2, 2), visualize=False)
+    return hog_features
+
+def prepare_dataset(folder):
+    images, labels = load_images_from_folder(folder)
+    features = []
+    for img in images:
+        preprocessed = preprocess_image(img)
+        contour_features = extract_contour_features(preprocessed)
+        hog_features = extract_hog_features(preprocessed)
+        combined_features = np.concatenate((contour_features, hog_features))
+        features.append(combined_features)
+    return np.array(features), np.array(labels)
+
+def train_classifier(features, labels):
+    X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.2, random_state=42)
+    
+    clf = LogisticRegression(max_iter=1000)
+    clf.fit(X_train, y_train)
+    
+    predictions = clf.predict(X_test)
+    accuracy = accuracy_score(y_test, predictions)
+    print(f'Accuracy: {accuracy * 100:.2f}%')
+    
+    # Print classification report and confusion matrix
+    print("\nClassification Report:")
+    print(classification_report(y_test, predictions))
+    print("\nConfusion Matrix:")
+    print(confusion_matrix(y_test, predictions))
+    
+    return clf
+
+def verify_signature(clf, input_image, expected_label):
+    preprocessed_input = preprocess_image(input_image)
+    contour_features = extract_contour_features(preprocessed_input)
+    hog_features = extract_hog_features(preprocessed_input)
+    input_features = np.concatenate((contour_features, hog_features)).reshape(1, -1)
+    
+    predicted_label = clf.predict(input_features)[0]
+    
+    if predicted_label == expected_label:
+        print(f'The signature is verified: {predicted_label}')
+    else:
+        print(f'The signature is not verified. Predicted: {predicted_label}, Expected: {expected_label}')
+
+if __name__ == "__main__":
+    # Path to your dataset of signatures
+    dataset_folder = 'path/to/your/signatures'  # Change to your dataset path
+
+    # Prepare dataset
+    features, labels = prepare_dataset(dataset_folder)
+
+    # Train classifier
+    classifier = train_classifier(features, labels)
+
+    # Load an input signature for verification
+    input_signature = cv2.imread('path/to/test/signature.png')  # Change to your test signature path
+    expected_label = 'expected_label'  # Set the expected label for verification
+
+    # Verify the signature
+    verify_signature(classifier, input_signature, expected_label)
